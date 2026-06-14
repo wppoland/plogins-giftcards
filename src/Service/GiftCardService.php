@@ -89,6 +89,11 @@ final class GiftCardService implements HasHooks
 
         $this->engine->registerHooks();
 
+        // Storefront styles + progressive-enhancement script (copy buttons,
+        // cosmetic uppercasing). Enqueued as real files; only on checkout and
+        // the order/account pages where our markup actually appears.
+        add_action('wp_enqueue_scripts', [$this, 'enqueueAssets']);
+
         // Show the buyer the code(s) their order issued, on the order-received /
         // account order page and in customer order emails. Reads only the rows
         // belonging to that order (not a public balance lookup).
@@ -99,26 +104,89 @@ final class GiftCardService implements HasHooks
     }
 
     /**
-     * Render the gift-card codes issued by an order on the front-end order page.
+     * Enqueue the storefront stylesheet and enhancement script, only where the
+     * gift-card UI is shown (checkout, order-received, account order views).
+     * Both are real files (Plugin-Check clean); the script is deferred + footer.
      */
-    public function renderOrderCodes(\WC_Order $order): void
+    public function enqueueAssets(): void
+    {
+        if (! $this->isEnabled()) {
+            return;
+        }
+
+        if (! function_exists('is_checkout')
+            || ! (is_checkout() || is_order_received_page() || is_account_page() || is_wc_endpoint_url('view-order'))
+        ) {
+            return;
+        }
+
+        wp_enqueue_style(
+            'giftcards-storefront',
+            GIFTCARDS_URL . 'assets/css/storefront.css',
+            [],
+            \GiftCards\VERSION,
+        );
+
+        wp_enqueue_script(
+            'giftcards-storefront',
+            GIFTCARDS_URL . 'assets/js/storefront.js',
+            [],
+            \GiftCards\VERSION,
+            ['in_footer' => true, 'strategy' => 'defer'],
+        );
+    }
+
+    /**
+     * Render the gift-card codes issued by an order on the front-end order page.
+     *
+     * @param bool $plain When true (emails), omit the interactive copy button so
+     *                    nothing relies on JS / unsupported markup in an inbox.
+     */
+    public function renderOrderCodes(\WC_Order $order, bool $plain = false): void
     {
         $cards = $this->repository->findByOrderId($order->get_id());
 
         if ($cards === []) {
+            // An order that issued no cards (e.g. all lines were ordinary
+            // products) shows nothing here — handled by the caller's gate; this
+            // guard simply keeps the section from rendering an empty shell.
             return;
         }
 
         echo '<section class="giftcards-order-codes">';
-        echo '<h2>' . esc_html__('Your gift cards', 'giftcards') . '</h2>';
+        echo '<h2 class="giftcards-order-codes__title">';
+        echo '<span aria-hidden="true">&#127873;</span> ';
+        echo esc_html__('Your gift cards', 'giftcards');
+        echo '</h2>';
+        echo '<p class="giftcards-order-codes__intro">'
+            . esc_html__('Keep these codes safe. Enter a code at checkout to spend its balance; any unused amount stays on the card.', 'giftcards')
+            . '</p>';
         echo '<table class="woocommerce-table giftcards-order-codes__table"><thead><tr>';
-        echo '<th>' . esc_html__('Code', 'giftcards') . '</th>';
-        echo '<th>' . esc_html__('Balance', 'giftcards') . '</th>';
+        echo '<th scope="col">' . esc_html__('Code', 'giftcards') . '</th>';
+        echo '<th scope="col">' . esc_html__('Balance', 'giftcards') . '</th>';
         echo '</tr></thead><tbody>';
 
+        $copyLabel = __('Copy code', 'giftcards');
+
         foreach ($cards as $card) {
-            echo '<tr><td><code>' . esc_html($card['code']) . '</code></td>';
-            echo '<td>' . wp_kses_post(wc_price($card['balance'])) . '</td></tr>';
+            $code    = (string) $card['code'];
+            $balance = (float) $card['balance'];
+
+            echo '<tr><td><span class="giftcards-order-codes__code">';
+            echo '<code>' . esc_html($code) . '</code>';
+
+            if (! $plain) {
+                printf(
+                    '<button type="button" class="giftcards-copy" data-code="%1$s" data-copied-label="%2$s" data-error-label="%3$s" aria-label="%4$s" title="%4$s"><span aria-hidden="true">&#128203;</span></button>',
+                    esc_attr($code),
+                    esc_attr__('Copied', 'giftcards'),
+                    esc_attr__('Copy failed — select and copy manually', 'giftcards'),
+                    esc_attr(sprintf('%s: %s', $copyLabel, $code)),
+                );
+            }
+
+            echo '</span></td>';
+            echo '<td>' . wp_kses_post(wc_price($balance)) . '</td></tr>';
         }
 
         echo '</tbody></table></section>';
@@ -141,7 +209,8 @@ final class GiftCardService implements HasHooks
             return;
         }
 
-        $this->renderOrderCodes($order);
+        // Emails: render the copy-button-free variant (no JS in inboxes).
+        $this->renderOrderCodes($order, true);
     }
 
     /**

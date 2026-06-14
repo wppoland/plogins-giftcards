@@ -56,6 +56,9 @@ The customer enters their code in the field at checkout. The remaining balance i
 * New setting: customise the checkout discount label shown when a code is applied (supports {code}).
 * New setting: show the issued gift-card codes to the buyer on the order-confirmation page and in their order emails (on by default).
 * Default email/label strings are now translatable.
+* Polished UI: redesigned settings page with inline help tooltips, click-to-insert email tokens and a live email preview.
+* Polished storefront: friendlier checkout redeem field and an issued-codes list with one-click copy.
+* Modern, themeable styling with dark-mode and reduced-motion support; no layout shift at checkout. Accessible (keyboard, ARIA, focus styles); assets ship as real files.
 
 = 0.1.0 =
 * Initial release.
